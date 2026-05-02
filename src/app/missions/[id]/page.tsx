@@ -28,6 +28,13 @@ export default async function MissionDetailPage({
   
   // Check auth
   const { data: { user } } = await supabase.auth.getUser();
+  let userRole = 'viewer';
+  if (user) {
+    const { data: roleData } = await supabase.from('user_roles').select('role').eq('user_id', user.id).single();
+    if (roleData) userRole = roleData.role;
+  }
+  
+  const currentUser = user ? { id: user.id, role: userRole } : null;
   
   const { data: mission } = await supabase
     .from('missions')
@@ -46,17 +53,25 @@ export default async function MissionDetailPage({
 
   if (!mission) notFound();
 
+  const isOwner = currentUser?.id === mission.owner_id;
+  const isAdmin = currentUser?.role === 'admin';
+
   return (
     <div className="container mx-auto p-4 max-w-4xl">
       {/* Breadcrumb */}
-      <nav className="text-sm mb-4">
-        <a href="/campaigns" className="text-blue-600">Campaigns</a>
-        {' / '}
-        <a href={`/campaigns/${mission.campaign_id}`} className="text-blue-600">
-          {mission.campaign?.name || 'Campaign'}
-        </a>
-        {' / '}
-        <span className="text-gray-600">{mission.name}</span>
+      <nav className="text-sm mb-4 flex justify-between items-center">
+        <div>
+          <a href="/campaigns" className="text-blue-600">Campaigns</a>
+          {' / '}
+          <a href={`/campaigns/${mission.campaign_id}`} className="text-blue-600">
+            {mission.campaign?.name || 'Campaign'}
+          </a>
+          {' / '}
+          <span className="text-gray-600">{mission.name}</span>
+        </div>
+        {(isAdmin || isOwner) && (
+          <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">You can manage this mission</span>
+        )}
       </nav>
 
       {/* Mission header */}
@@ -82,7 +97,12 @@ export default async function MissionDetailPage({
       {/* Task list */}
       <div className="mb-6">
         <h2 className="text-xl font-semibold mb-4">Tasks</h2>
-        <TaskList tasks={mission.tasks as any} missionId={mission.id} canEdit={!!user} />
+        <TaskList 
+          tasks={mission.tasks as any} 
+          missionId={mission.id} 
+          missionOwnerId={mission.owner_id}
+          currentUser={currentUser} 
+        />
       </div>
     </div>
   );

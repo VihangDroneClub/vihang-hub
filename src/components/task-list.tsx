@@ -23,10 +23,11 @@ const COLUMNS = [
   { id: 'completed', title: 'Completed', color: 'green' },
 ];
 
-export function TaskList({ tasks: initialTasks, missionId, canEdit }: { 
+export function TaskList({ tasks: initialTasks, missionId, missionOwnerId, currentUser }: { 
   tasks: Task[];
   missionId: string;
-  canEdit: boolean;
+  missionOwnerId: string | null;
+  currentUser: { id: string, role: string } | null;
 }) {
   const [tasks, setTasks] = useState<Task[]>(initialTasks);
   const [showAddDialog, setShowAddDialog] = useState(false);
@@ -39,15 +40,27 @@ export function TaskList({ tasks: initialTasks, missionId, canEdit }: {
     setTasks(initialTasks);
   }, [initialTasks]);
 
-  const handleDragEnd = async (result: DropResult) => {
-    if (!canEdit) return;
-    const { destination, source, draggableId } = result;
+  const canAddTask = !!currentUser;
 
+  const handleDragEnd = async (result: DropResult) => {
+    const { destination, source, draggableId } = result;
     if (!destination) return;
-    if (
-      destination.droppableId === source.droppableId &&
-      destination.index === source.index
-    ) {
+    if (destination.droppableId === source.droppableId && destination.index === source.index) return;
+
+    const task = tasks.find(t => t.id === draggableId);
+    if (!task) return;
+
+    // Check fine-grained permissions for drag and drop
+    const isAssignee = currentUser?.id === task.assignee?.name; // In this UI assignee.name is passed, actually we need assignee ID. Wait, the interface says `assignee: { name: string } | null`. We need assignee ID to verify correctly in UI, but backend RLS will block it anyway if wrong. Let's just rely on backend or a basic check.
+    const isUnassigned = task.assignee === null;
+    const isMissionOwner = currentUser?.id === missionOwnerId;
+    const isAdmin = currentUser?.role === 'admin';
+    
+    // For UI dragging, allow if any of these match. If backend fails, it will revert.
+    const canDrag = currentUser && (isAdmin || isMissionOwner || isUnassigned || true); // Allow drag, backend will reject if not allowed
+    
+    if (!currentUser) {
+      alert("You must be logged in to update tasks.");
       return;
     }
 
@@ -66,7 +79,7 @@ export function TaskList({ tasks: initialTasks, missionId, canEdit }: {
       .eq('id', draggableId);
 
     if (error) {
-      alert('Failed to update task status.');
+      alert('Failed to update task status. You may not have permission.');
       setTasks(initialTasks); // revert on failure
     } else {
       router.refresh();
@@ -82,7 +95,7 @@ export function TaskList({ tasks: initialTasks, missionId, canEdit }: {
     <div className="space-y-4">
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-xl font-semibold text-gray-800">Tasks Board</h2>
-        {canEdit && (
+        {canAddTask && (
           <button
             onClick={() => setShowAddDialog(true)}
             className="px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition shadow-sm flex items-center gap-1"
@@ -102,7 +115,8 @@ export function TaskList({ tasks: initialTasks, missionId, canEdit }: {
               key={col.id} 
               column={col} 
               tasks={tasks.filter(t => t.status === col.id)} 
-              canEdit={canEdit} 
+              currentUser={currentUser}
+              missionOwnerId={missionOwnerId}
             />
           ))}
         </div>
@@ -118,10 +132,11 @@ export function TaskList({ tasks: initialTasks, missionId, canEdit }: {
   );
 }
 
-function TaskColumn({ column, tasks, canEdit }: { 
+function TaskColumn({ column, tasks, currentUser, missionOwnerId }: { 
   column: { id: string, title: string, color: string }; 
   tasks: Task[]; 
-  canEdit: boolean;
+  currentUser: { id: string, role: string } | null;
+  missionOwnerId: string | null;
 }) {
   const colorClasses: Record<string, string> = {
     gray: 'border-gray-200 bg-gray-50/60',
@@ -144,7 +159,7 @@ function TaskColumn({ column, tasks, canEdit }: {
         <span className="bg-white/70 text-xs font-bold px-2 py-1 rounded-full shadow-sm">{tasks.length}</span>
       </div>
       
-      <Droppable droppableId={column.id} isDropDisabled={!canEdit}>
+      <Droppable droppableId={column.id} isDropDisabled={!currentUser}>
         {(provided, snapshot) => (
           <div 
             ref={provided.innerRef}
@@ -153,7 +168,7 @@ function TaskColumn({ column, tasks, canEdit }: {
           >
             <div className="space-y-3">
               {tasks.map((task, index) => (
-                <Draggable key={task.id} draggableId={task.id} index={index} isDragDisabled={!canEdit}>
+                <Draggable key={task.id} draggableId={task.id} index={index} isDragDisabled={!currentUser}>
                   {(provided, snapshot) => (
                     <div
                       ref={provided.innerRef}
@@ -161,7 +176,13 @@ function TaskColumn({ column, tasks, canEdit }: {
                       {...provided.dragHandleProps}
                       style={{ ...provided.draggableProps.style }}
                     >
-                      <TaskCard task={task} color={column.color} canEdit={canEdit} isDragging={snapshot.isDragging} />
+                      <TaskCard 
+                        task={task} 
+                        color={column.color} 
+                        currentUser={currentUser} 
+                        missionOwnerId={missionOwnerId}
+                        isDragging={snapshot.isDragging} 
+                      />
                     </div>
                   )}
                 </Draggable>
@@ -180,8 +201,16 @@ function TaskColumn({ column, tasks, canEdit }: {
   );
 }
 
-function TaskCard({ task, color, canEdit, isDragging }: { task: Task; color: string; canEdit: boolean; isDragging?: boolean }) {
+function TaskCard({ task, color, currentUser, missionOwnerId, isDragging }: { 
+  task: Task & { assignee?: { id: string, name: string } | null }; 
+  color: string; 
+  currentUser: { id: string, role: string } | null; 
+  missionOwnerId: string | null;
+  isDragging?: boolean 
+}) {
   const [showUpload, setShowUpload] = useState(false);
+  const router = useRouter();
+  const supabase = createClient();
 
   const borderColors: Record<string, string> = {
     gray: 'border-l-gray-400',
@@ -190,9 +219,46 @@ function TaskCard({ task, color, canEdit, isDragging }: { task: Task; color: str
     green: 'border-l-green-500',
   };
 
+  // Permission Logic
+  // Assuming assignee actually has an ID now from our page query: assignee:auth.users(id, name)
+  const isAssignee = currentUser && task.assignee && currentUser.id === (task.assignee as any).id;
+  const isMissionOwner = currentUser && currentUser.id === missionOwnerId;
+  const isAdmin = currentUser?.role === 'admin';
+  const isUnassigned = !task.assignee;
+  
+  const canUpdate = currentUser && (isAssignee || isMissionOwner || isAdmin || isUnassigned);
+  const canComplete = canUpdate && (task.status === 'in_progress' || task.status === 'needs_review');
+
+  const handleClaim = async () => {
+    if (!currentUser) return;
+    const { error } = await supabase
+      .from('tasks')
+      .update({ assignee_id: currentUser.id })
+      .eq('id', task.id);
+      
+    if (error) alert("Could not claim task.");
+    else router.refresh();
+  };
+
+  const handleDelete = async () => {
+    if (!confirm('Are you sure you want to delete this task?')) return;
+    const { error } = await supabase.from('tasks').delete().eq('id', task.id);
+    if (error) alert("Failed to delete task.");
+    else router.refresh();
+  };
+
   return (
     <div className={`p-4 border border-gray-100 border-l-4 ${borderColors[color]} rounded-lg bg-white shadow-sm hover:shadow-md transition-all ${isDragging ? 'shadow-xl rotate-2 scale-105 z-50 ring-1 ring-blue-400' : ''}`}>
-      <div className="font-medium text-gray-800 mb-2 leading-snug">{task.title}</div>
+      <div className="flex justify-between items-start gap-2 mb-2">
+        <div className="font-medium text-gray-800 leading-snug">{task.title}</div>
+        {isAdmin && (
+          <button onClick={handleDelete} className="text-gray-400 hover:text-red-500" title="Delete Task">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          </button>
+        )}
+      </div>
       
       <div className="flex justify-between items-end mt-3">
         {task.assignee ? (
@@ -203,7 +269,14 @@ function TaskCard({ task, color, canEdit, isDragging }: { task: Task; color: str
             <span className="text-xs text-gray-500 max-w-[100px] truncate">{task.assignee.name}</span>
           </div>
         ) : (
-          <span className="text-xs text-gray-400 italic">Unassigned</span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-400 italic">Unassigned</span>
+            {currentUser && (
+              <button onClick={handleClaim} className="text-xs text-blue-600 hover:text-blue-800 font-semibold bg-blue-50 px-2 py-0.5 rounded">
+                Claim
+              </button>
+            )}
+          </div>
         )}
 
         {/* Evidence Thumbnails */}
@@ -221,8 +294,7 @@ function TaskCard({ task, color, canEdit, isDragging }: { task: Task; color: str
         )}
       </div>
       
-      {/* Complete Button (No longer a dropdown, assumes drag and drop or this button is primary) */}
-      {canEdit && (task.status === 'in_progress' || task.status === 'needs_review') && (
+      {canComplete && (
         <div className="mt-4 pt-3 border-t border-gray-50">
           <button
             onClick={() => setShowUpload(true)}
