@@ -11,7 +11,7 @@ interface Task {
   id: string;
   title: string;
   status: string;
-  assignee: { name: string } | null;
+  assignee: { id: string, name?: string, email?: string } | null;
   evidence_photos: string[];
   completed_at: string | null;
 }
@@ -51,7 +51,7 @@ export function TaskList({ tasks: initialTasks, missionId, missionOwnerId, curre
     if (!task) return;
 
     // Check fine-grained permissions for drag and drop
-    const isAssignee = currentUser?.id === task.assignee?.name; // In this UI assignee.name is passed, actually we need assignee ID. Wait, the interface says `assignee: { name: string } | null`. We need assignee ID to verify correctly in UI, but backend RLS will block it anyway if wrong. Let's just rely on backend or a basic check.
+    const isAssignee = currentUser?.id === task.assignee?.id;
     const isUnassigned = task.assignee === null;
     const isMissionOwner = currentUser?.id === missionOwnerId;
     const isAdmin = currentUser?.role === 'admin';
@@ -202,7 +202,7 @@ function TaskColumn({ column, tasks, currentUser, missionOwnerId }: {
 }
 
 function TaskCard({ task, color, currentUser, missionOwnerId, isDragging }: { 
-  task: Task & { assignee?: { id: string, name: string } | null }; 
+  task: Task; 
   color: string; 
   currentUser: { id: string, role: string } | null; 
   missionOwnerId: string | null;
@@ -220,8 +220,7 @@ function TaskCard({ task, color, currentUser, missionOwnerId, isDragging }: {
   };
 
   // Permission Logic
-  // Assuming assignee actually has an ID now from our page query: assignee:auth.users(id, name)
-  const isAssignee = currentUser && task.assignee && currentUser.id === (task.assignee as any).id;
+  const isAssignee = currentUser && task.assignee && currentUser.id === task.assignee.id;
   const isMissionOwner = currentUser && currentUser.id === missionOwnerId;
   const isAdmin = currentUser?.role === 'admin';
   const isUnassigned = !task.assignee;
@@ -263,10 +262,10 @@ function TaskCard({ task, color, currentUser, missionOwnerId, isDragging }: {
       <div className="flex justify-between items-end mt-3">
         {task.assignee ? (
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center text-xs font-bold text-blue-700 shadow-sm" title={task.assignee.name}>
-              {task.assignee.name.charAt(0).toUpperCase()}
+            <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center text-xs font-bold text-blue-700 shadow-sm" title={task.assignee.name || task.assignee.email || 'User'}>
+              {(task.assignee.name || task.assignee.email || 'U').charAt(0).toUpperCase()}
             </div>
-            <span className="text-xs text-gray-500 max-w-[100px] truncate">{task.assignee.name}</span>
+            <span className="text-xs text-gray-500 max-w-[100px] truncate">{task.assignee.name || task.assignee.email || 'User'}</span>
           </div>
         ) : (
           <div className="flex items-center gap-2">

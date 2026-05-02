@@ -36,20 +36,22 @@ export default async function MissionDetailPage({
   
   const currentUser = user ? { id: user.id, role: userRole } : null;
   
-  const { data: mission } = await supabase
+  const { data } = await supabase
     .from('missions')
     .select(`
       *,
-      owner:auth.users(id, name, email),
+      owner:auth.users(id, email),
       campaign:campaigns(id, name, description),
       tasks(
         id, title, description, status, 
-        assignee:auth.users(id, name),
+        assignee:auth.users(id, email),
         evidence_photos, completed_at
       )
     `)
     .eq('id', id)
     .single();
+
+  const mission = data as any;
 
   if (!mission) notFound();
 

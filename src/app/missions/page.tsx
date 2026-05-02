@@ -5,15 +5,17 @@ export default async function MissionsPage() {
   const supabase = await createClient();
   
   // No auth check - public route
-  const { data: missions } = await supabase
+  const { data } = await supabase
     .from('missions')
     .select(`
       *,
-      owner:auth.users(id, name, email),
+      owner:auth.users(id, email),
       campaign:campaigns(id, name),
       tasks(id, status)
     `)
     .order('created_at', { ascending: false });
+    
+  const missions = data as any[];
 
   return (
     <div className="container mx-auto p-6 max-w-7xl">
