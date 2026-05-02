@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
 
 export function UploadEvidenceDialog({ 
   taskId, 
@@ -48,8 +49,7 @@ export function UploadEvidenceDialog({
       }
 
       // Update task with evidence and mark completed
-      const { error: updateError } = await supabase
-        .from('tasks')
+      const { error: updateError } = await (supabase.from('tasks') as any)
         .update({
           status: 'completed',
           evidence_photos: uploadedUrls,
@@ -59,10 +59,11 @@ export function UploadEvidenceDialog({
 
       if (updateError) throw updateError;
 
+      toast.success('Task marked as complete!');
       router.refresh();
       onClose();
     } catch (error: any) {
-      alert('Error uploading: ' + error.message);
+      toast.error('Error uploading: ' + error.message);
     } finally {
       setUploading(false);
     }

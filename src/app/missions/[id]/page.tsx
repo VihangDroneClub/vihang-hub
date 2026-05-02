@@ -30,8 +30,8 @@ export default async function MissionDetailPage({
   const { data: { user } } = await supabase.auth.getUser();
   let userRole = 'viewer';
   if (user) {
-    const { data: roleData } = await supabase.from('user_roles').select('role').eq('user_id', user.id).single();
-    if (roleData) userRole = roleData.role;
+    const { data: roleData } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+    if (roleData) userRole = (roleData as any).role;
   }
   
   const currentUser = user ? { id: user.id, role: userRole } : null;

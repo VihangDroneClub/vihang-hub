@@ -35,26 +35,26 @@ export default async function AdminDashboard() {
   // Fetch stats
   const [
     { count: totalMissions },
-    { count: activeMissions },
-    { count: blockedMissions },
+    { count: totalCampaigns },
+    { count: totalTasks },
     { count: totalMembers },
   ] = await Promise.all([
     supabase.from('missions').select('*', { count: 'exact', head: true }),
-    supabase.from('missions').select('*', { count: 'exact', head: true }).eq('status', 'in_progress'),
-    supabase.from('missions').select('*', { count: 'exact', head: true }).eq('status', 'blocked'),
-    supabase.from('user_roles').select('*', { count: 'exact', head: true }),
+    supabase.from('campaigns').select('*', { count: 'exact', head: true }),
+    supabase.from('tasks').select('*', { count: 'exact', head: true }),
+    supabase.from('profiles').select('*', { count: 'exact', head: true }),
   ]);
 
   return (
-    <div className="container mx-auto p-6">
-      <h1 className="text-3xl font-bold mb-6">Admin Dashboard</h1>
+    <div className="container mx-auto">
+      <h1 className="text-3xl font-bold mb-6 text-gray-900">Admin Dashboard</h1>
 
       {/* Stats grid */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-        <StatCard title="Total Missions" value={totalMissions || 0} />
-        <StatCard title="Active" value={activeMissions || 0} color="blue" />
-        <StatCard title="Blocked" value={blockedMissions || 0} color="red" />
-        <StatCard title="Team Members" value={totalMembers || 0} color="green" />
+        <StatCard title="Total Campaigns" value={totalCampaigns || 0} color="blue" />
+        <StatCard title="Total Missions" value={totalMissions || 0} color="green" />
+        <StatCard title="Total Tasks" value={totalTasks || 0} color="yellow" />
+        <StatCard title="Team Members" value={totalMembers || 0} color="gray" />
       </div>
 
       {/* Quick actions */}
@@ -68,11 +68,6 @@ export default async function AdminDashboard() {
           title="Create Mission"
           href="/admin/missions/new"
           icon="🎯"
-        />
-        <QuickActionCard 
-          title="Add Member"
-          href="/admin/members/new"
-          icon="👤"
         />
       </div>
     </div>

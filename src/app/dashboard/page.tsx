@@ -1,201 +1,157 @@
 import { createClient } from '@/lib/supabase/server'
-import { MissionCards } from '@/components/dashboard/MissionCards'
-import { MonthlyChart } from '@/components/dashboard/MonthlyChart'
-import { MyTasks } from '@/components/dashboard/MyTasks'
-import { ActivityFeed } from '@/components/dashboard/ActivityFeed'
-import { UpcomingDeadlines } from '@/components/dashboard/UpcomingDeadlines'
-import { startOfMonth, subMonths, format, isWithinInterval, endOfMonth } from 'date-fns'
+import Link from 'next/link'
 
 export default async function DashboardPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  // 1. Fetch Missions with Stats
-  const { data: missions } = await supabase
-    .from('missions')
-    .select(`
-      *,
-      projects (
-        id,
-        status,
-        tasks (
-          id,
-          status
-        )
-      )
-    `)
+  if (!user) return null;
 
-  const missionsWithStats = missions?.map(m => {
-    const allTasks = m.projects.flatMap((p: { tasks: { status: string }[] }) => p.tasks)
-    return {
-      ...m,
-      totalTasks: allTasks.length,
-      completedTasks: allTasks.filter((t: { status: string }) => t.status === 'done').length,
-      activeProjects: m.projects.filter((p: { status: string }) => p.status === 'active').length
-    }
-  }) || []
-
-  // 2. Fetch My Tasks
-  const { data: profile } = await supabase
+  const { data } = await supabase
     .from('profiles')
-    .select('id')
-    .eq('user_id', user?.id)
+    .select('*')
+    .eq('id', user.id)
     .single()
+    
+  const profile = data as any;
 
+  // Fetch tasks assigned to the user
   const { data: myTasks } = await supabase
     .from('tasks')
     .select(`
-      id,
-      title,
-      status,
-      due_date,
-      projects ( name )
+      *,
+      missions (
+        id,
+        title,
+        campaigns (id, title)
+      )
     `)
-    .in('id', (
-      await supabase
-        .from('task_assignments')
-        .select('task_id')
-        .eq('member_id', profile?.id)
-    ).data?.map(a => a.task_id) || [])
-    .limit(5)
+    .eq('assignee_id', user.id)
+    .order('created_at', { ascending: false })
 
-  const formattedMyTasks = myTasks?.map((t: { id: string, title: string, status: string, due_date: string | null, projects: { name: string }[] }) => ({
-    id: t.id,
-    title: t.title,
-    status: t.status,
-    due_date: t.due_date,
-    project_name: (t.projects as unknown as { name: string })?.name || 'Unassigned Unit'
-  })) || []
-
-  // 3. Fetch Activity Feed
-  const { data: auditLogs } = await supabase
-    .from('audit_log')
+  // Fetch unassigned tasks that the user might want to claim
+  const { data: availableTasks } = await supabase
+    .from('tasks')
     .select(`
       *,
-      profiles (
-        full_name,
-        avatar_url
+      missions (
+        id,
+        title
       )
     `)
+    .is('assignee_id', null)
+    .eq('status', 'todo')
     .order('created_at', { ascending: false })
-    .limit(10)
+    .limit(5)
 
-  // This is a simplified version, ideally we'd join with entity names
-  const activities = auditLogs?.map((log: { id: string, profiles?: { full_name: string, avatar_url: string | null }, action: string, entity_type: string, new_value?: { title?: string, name?: string }, created_at: string }) => ({
-    id: log.id,
-    actor_name: log.profiles?.full_name || 'System',
-    actor_avatar: log.profiles?.avatar_url || null,
-    action: log.action,
-    entity_type: log.entity_type,
-    entity_name: log.new_value?.title || log.new_value?.name || 'Unknown',
-    created_at: log.created_at
-  })) || []
-
-  // 4. Monthly Chart Data (Real Data)
-  const last6Months = Array.from({ length: 6 }).map((_, i) => {
-    const date = subMonths(new Date(), 5 - i)
-    return {
-      start: startOfMonth(date),
-      end: endOfMonth(date),
-      label: format(date, 'MMM yyyy')
-    }
-  })
-
-  const { data: completedTasks } = await supabase
-    .from('tasks')
+  // Fetch missions owned by the user (if any)
+  const { data: myMissions } = await supabase
+    .from('missions')
     .select(`
-      updated_at,
-      projects (
-        missions ( name )
-      )
+      *,
+      campaigns (id, title),
+      tasks (id, status)
     `)
-    .eq('status', 'done')
-    .gte('updated_at', last6Months[0].start.toISOString())
-
-  const chartData = last6Months.map(month => {
-    const monthData: Record<string, string | number> & { month: string } = { month: month.label }
-    missions?.forEach(m => {
-      monthData[m.name] = 0
-    })
-
-    completedTasks?.forEach((task: { updated_at: string, projects: { missions: { name: string }[] }[] }) => {
-      const taskDate = new Date(task.updated_at)
-      if (isWithinInterval(taskDate, { start: month.start, end: month.end })) {
-        const missionName = (task.projects as unknown as { missions: { name: string } })?.missions?.name
-        monthData[missionName] = ((monthData[missionName] as number) || 0) + 1
-      }
-    })
-
-    return monthData
-  })
-
-  // 5. Upcoming Deadlines
-  const { data: deadlineTasks } = await supabase
-    .from('tasks')
-    .select('id, title, due_date')
-    .neq('status', 'done')
-    .not('due_date', 'is', null)
-    .order('due_date', { ascending: true })
-    .limit(3)
-
-  const deadlines = [
-    ...(deadlineTasks?.filter(t => t.due_date).map((t: { id: string; title: string; due_date: string | null }) => ({ id: t.id, title: t.title, due_date: t.due_date as string, type: 'task' as const })) || [])
-  ]
+    .eq('owner_id', user.id)
 
   return (
-    <div className="p-6 md:p-10 space-y-10 animate-fade-in">
-      <div className="flex flex-col gap-1">
-        <h1 className="font-heading text-2xl md:text-3xl font-bold tracking-tight text-[var(--text-primary)]">
-          Operations Dashboard
+    <div className="container mx-auto p-6 max-w-7xl">
+      <div className="mb-8">
+        <h1 className="text-3xl font-extrabold tracking-tight text-gray-900 sm:text-4xl mb-2">
+          Welcome back, {profile?.full_name || 'Member'}
         </h1>
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <p className="mono text-[10px] md:text-[11px] uppercase tracking-wider text-[var(--text-muted)]">
-            System Status: Nominal / All units active
-          </p>
-        </div>
+        <p className="text-lg text-gray-500">Here is your current workload and active responsibilities.</p>
       </div>
 
-      <section className="space-y-4">
-        <div className="flex items-center gap-4">
-          <h2 className="font-heading text-xs font-bold tracking-[0.2em] text-[var(--accent-cyan)] uppercase whitespace-nowrap">
-            Mission Readiness
-          </h2>
-          <div className="h-px w-full bg-gradient-to-r from-[var(--accent-cyan-dim)] to-transparent" />
-        </div>
-        <MissionCards missions={missionsWithStats} />
-      </section>
+      <div className="grid gap-8 md:grid-cols-3">
+        {/* Left Column: My Tasks */}
+        <div className="md:col-span-2 space-y-8">
+          <section>
+            <h2 className="text-xl font-bold text-gray-900 mb-4">My Assigned Tasks</h2>
+            {myTasks && myTasks.length > 0 ? (
+              <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+                <ul className="divide-y divide-gray-100">
+                  {myTasks.map((task: any) => (
+                    <li key={task.id} className="p-4 hover:bg-gray-50 transition-colors">
+                      <div className="flex justify-between items-start mb-1">
+                        <Link href={`/missions/${task.missions?.id}`} className="font-semibold text-gray-900 hover:text-blue-600">
+                          {task.title}
+                        </Link>
+                        <span className={`px-2.5 py-0.5 text-xs font-semibold rounded-full ring-1 ring-inset ${
+                          task.status === 'completed' ? 'bg-green-50 text-green-700 ring-green-200' :
+                          task.status === 'in_progress' ? 'bg-blue-50 text-blue-700 ring-blue-200' :
+                          'bg-gray-50 text-gray-700 ring-gray-200'
+                        }`}>
+                          {task.status.replace('_', ' ')}
+                        </span>
+                      </div>
+                      <div className="text-sm text-gray-500">
+                        Mission: <span className="font-medium text-gray-700">{task.missions?.title}</span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <div className="text-center py-10 bg-gray-50 rounded-xl border border-dashed border-gray-200">
+                <p className="text-gray-500">You don't have any assigned tasks.</p>
+              </div>
+            )}
+          </section>
 
-      <section className="space-y-4">
-        <div className="flex items-center gap-4">
-          <h2 className="font-heading text-xs font-bold tracking-[0.2em] text-[var(--accent-cyan)] uppercase whitespace-nowrap">
-            Performance Analytics
-          </h2>
-          <div className="h-px w-full bg-gradient-to-r from-[var(--accent-cyan-dim)] to-transparent" />
+          {myMissions && myMissions.length > 0 && (
+            <section>
+              <h2 className="text-xl font-bold text-gray-900 mb-4">Missions I Lead</h2>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {myMissions.map((mission: any) => {
+                  const total = mission.tasks.length;
+                  const completed = mission.tasks.filter((t: any) => t.status === 'completed').length;
+                  const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+                  return (
+                    <Link key={mission.id} href={`/missions/${mission.id}`} className="block">
+                      <div className="p-5 bg-white border border-gray-200 rounded-xl hover:shadow-md transition-shadow">
+                        <div className="text-xs font-semibold text-blue-600 mb-1">{mission.campaigns?.title}</div>
+                        <h3 className="font-bold text-gray-900 mb-3">{mission.title}</h3>
+                        <div className="w-full bg-gray-100 rounded-full h-1.5 mb-1.5">
+                          <div className="bg-blue-600 h-1.5 rounded-full" style={{ width: `${percent}%` }}></div>
+                        </div>
+                        <div className="text-xs text-gray-500 text-right">{completed}/{total} tasks</div>
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            </section>
+          )}
         </div>
-        <div className="grid gap-6 lg:grid-cols-5">
-          <MonthlyChart 
-            data={chartData} 
-            missionNames={missions?.map(m => m.name) || []} 
-          />
-        </div>
-      </section>
 
-      <section className="space-y-4">
-        <div className="flex items-center gap-4">
-          <h2 className="font-heading text-xs font-bold tracking-[0.2em] text-[var(--accent-cyan)] uppercase whitespace-nowrap">
-            Tactical Overview
-          </h2>
-          <div className="h-px w-full bg-gradient-to-r from-[var(--accent-cyan-dim)] to-transparent" />
+        {/* Right Column: Available Tasks */}
+        <div className="space-y-6">
+          <section>
+            <h2 className="text-xl font-bold text-gray-900 mb-4">Available Tasks</h2>
+            {availableTasks && availableTasks.length > 0 ? (
+              <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-4 shadow-sm">
+                {availableTasks.map((task: any) => (
+                  <div key={task.id} className="pb-4 border-b border-gray-100 last:border-0 last:pb-0">
+                    <h4 className="font-semibold text-gray-900 text-sm mb-1">{task.title}</h4>
+                    <p className="text-xs text-gray-500 mb-2">In: {task.missions?.title}</p>
+                    <Link 
+                      href={`/missions/${task.missions?.id}`}
+                      className="text-xs font-medium text-blue-600 hover:text-blue-800 bg-blue-50 px-3 py-1.5 rounded inline-block"
+                    >
+                      View & Claim
+                    </Link>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 bg-gray-50 rounded-xl border border-dashed border-gray-200">
+                <p className="text-sm text-gray-500">No unassigned tasks currently available.</p>
+              </div>
+            )}
+          </section>
         </div>
-        <div className="grid gap-6 lg:grid-cols-7">
-          <ActivityFeed activities={activities} />
-          <div className="lg:col-span-4 grid gap-6 md:grid-cols-2 lg:grid-cols-1">
-            <MyTasks tasks={formattedMyTasks} />
-            <UpcomingDeadlines deadlines={deadlines} />
-          </div>
-        </div>
-      </section>
+      </div>
     </div>
   )
 }

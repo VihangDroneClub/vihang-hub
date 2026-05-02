@@ -31,7 +31,7 @@ export function AddTaskDialog({
         title,
         description,
         status: 'todo',
-      });
+      } as any);
 
     if (error) {
       alert('Error creating task: ' + error.message);

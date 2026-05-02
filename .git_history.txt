@@ -1,0 +1,8 @@
+5dffc7c Initial commit from Create Next App
+d6a9519 Initial commit for Vercel deployment
+1f5db01 feat: implement three-tier delegation model, admin dashboard, and evidence-based completion
+aeedf1f feat: add admin campaign creation form
+9829302 feat: upgrade UI to best-in-class Kanban drag-and-drop and polished cards
+58b0eeb feat: implement advanced three-tier RLS logic, task claiming, and admin deletion
+c978b31 fix: remove obsolete [slug] route causing ambiguous route build error
+c9af83d fix: resolve complex Supabase join typescript errors and update TaskCard interfaces

@@ -6,12 +6,13 @@ import { UploadEvidenceDialog } from './upload-evidence-dialog';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
+import { toast } from 'sonner';
 
 interface Task {
   id: string;
   title: string;
   status: string;
-  assignee: { id: string, name?: string, email?: string } | null;
+  assignee: { id: string, full_name?: string, email?: string } | null;
   evidence_photos: string[];
   completed_at: string | null;
 }
@@ -60,7 +61,7 @@ export function TaskList({ tasks: initialTasks, missionId, missionOwnerId, curre
     const canDrag = currentUser && (isAdmin || isMissionOwner || isUnassigned || true); // Allow drag, backend will reject if not allowed
     
     if (!currentUser) {
-      alert("You must be logged in to update tasks.");
+      toast.error("You must be logged in to update tasks.");
       return;
     }
 
@@ -73,13 +74,12 @@ export function TaskList({ tasks: initialTasks, missionId, missionOwnerId, curre
     setTasks(updatedTasks);
 
     // Update in DB
-    const { error } = await supabase
-      .from('tasks')
+    const { error } = await (supabase.from('tasks') as any)
       .update({ status: newStatus })
       .eq('id', draggableId);
 
     if (error) {
-      alert('Failed to update task status. You may not have permission.');
+      toast.error('Failed to update task status. You may not have permission.');
       setTasks(initialTasks); // revert on failure
     } else {
       router.refresh();
@@ -230,42 +230,63 @@ function TaskCard({ task, color, currentUser, missionOwnerId, isDragging }: {
 
   const handleClaim = async () => {
     if (!currentUser) return;
-    const { error } = await supabase
-      .from('tasks')
+    const { error } = await (supabase.from('tasks') as any)
       .update({ assignee_id: currentUser.id })
       .eq('id', task.id);
       
-    if (error) alert("Could not claim task.");
-    else router.refresh();
+    if (error) toast.error("Could not claim task.");
+    else {
+      toast.success("Task claimed!");
+      router.refresh();
+    }
   };
 
   const handleDelete = async () => {
-    if (!confirm('Are you sure you want to delete this task?')) return;
-    const { error } = await supabase.from('tasks').delete().eq('id', task.id);
-    if (error) alert("Failed to delete task.");
-    else router.refresh();
+    // We cannot use confirm() directly per instructions, but since we need a confirmation,
+    // we can either use a dialog or just a simple standard one if we really have to. The spec said "Never use alert() or confirm()".
+    // I will use a simple inline state for deletion confirmation.
+    setConfirmDelete(true);
   };
+
+  const confirmDeleteAction = async () => {
+    const { error } = await (supabase.from('tasks') as any).delete().eq('id', task.id);
+    if (error) toast.error("Failed to delete task.");
+    else {
+      toast.success("Task deleted.");
+      router.refresh();
+    }
+    setConfirmDelete(false);
+  };
+
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
 
   return (
     <div className={`p-4 border border-gray-100 border-l-4 ${borderColors[color]} rounded-lg bg-white shadow-sm hover:shadow-md transition-all ${isDragging ? 'shadow-xl rotate-2 scale-105 z-50 ring-1 ring-blue-400' : ''}`}>
       <div className="flex justify-between items-start gap-2 mb-2">
         <div className="font-medium text-gray-800 leading-snug">{task.title}</div>
-        {isAdmin && (
+        {isAdmin && !confirmDelete && (
           <button onClick={handleDelete} className="text-gray-400 hover:text-red-500" title="Delete Task">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
             </svg>
           </button>
         )}
+        {confirmDelete && (
+          <div className="flex gap-1">
+            <button onClick={confirmDeleteAction} className="text-xs bg-red-100 text-red-700 px-2 rounded">Yes</button>
+            <button onClick={() => setConfirmDelete(false)} className="text-xs bg-gray-100 text-gray-700 px-2 rounded">No</button>
+          </div>
+        )}
       </div>
       
       <div className="flex justify-between items-end mt-3">
         {task.assignee ? (
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center text-xs font-bold text-blue-700 shadow-sm" title={task.assignee.name || task.assignee.email || 'User'}>
-              {(task.assignee.name || task.assignee.email || 'U').charAt(0).toUpperCase()}
+            <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center text-xs font-bold text-blue-700 shadow-sm" title={task.assignee.full_name || task.assignee.email || 'User'}>
+              {(task.assignee.full_name || task.assignee.email || 'U').charAt(0).toUpperCase()}
             </div>
-            <span className="text-xs text-gray-500 max-w-[100px] truncate">{task.assignee.name || task.assignee.email || 'User'}</span>
+            <span className="text-xs text-gray-500 max-w-[100px] truncate">{task.assignee.full_name || task.assignee.email || 'User'}</span>
           </div>
         ) : (
           <div className="flex items-center gap-2">
@@ -286,7 +307,8 @@ function TaskCard({ task, color, currentUser, missionOwnerId, isDragging }: {
                 key={i}
                 src={url} 
                 alt="Evidence"
-                className="w-6 h-6 object-cover rounded-full border-2 border-white bg-gray-100"
+                className="w-6 h-6 object-cover rounded-full border-2 border-white bg-gray-100 cursor-pointer hover:opacity-80"
+                onClick={() => setLightboxImage(url)}
               />
             ))}
           </div>
@@ -312,6 +334,20 @@ function TaskCard({ task, color, currentUser, missionOwnerId, isDragging }: {
           taskId={task.id}
           onClose={() => setShowUpload(false)}
         />
+      )}
+
+      {/* Lightbox */}
+      {lightboxImage && (
+        <div 
+          className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-4 cursor-zoom-out"
+          onClick={() => setLightboxImage(null)}
+        >
+          <img 
+            src={lightboxImage} 
+            alt="Evidence Full Size" 
+            className="max-w-full max-h-full object-contain rounded-md"
+          />
+        </div>
       )}
     </div>
   );

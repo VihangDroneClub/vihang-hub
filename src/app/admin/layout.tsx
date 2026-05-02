@@ -15,14 +15,16 @@ export default async function AdminLayout({
   }
 
   // Check admin role
-  const { data: userRole } = await supabase
-    .from('user_roles')
+  const { data } = await supabase
+    .from('profiles')
     .select('role')
-    .eq('user_id', user.id)
+    .eq('id', user.id)
     .single();
 
-  if (userRole?.role !== 'admin') {
-    redirect('/missions'); // Not admin, redirect
+  const profile = data as any;
+
+  if (profile?.role !== 'admin') {
+    redirect('/dashboard'); // Not admin, redirect
   }
 
   return (
